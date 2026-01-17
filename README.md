@@ -250,6 +250,7 @@ Input/Output:
 Model:
   -model string       Path to ggml/gguf model or model name
   -model-dir string   Directory for model files (enables auto-download)
+  -list-models        List available models with descriptions
 
 Processing:
   -lang string        Language (e.g. 'en'); empty = auto
@@ -270,7 +271,81 @@ Configuration:
 Batch Processing:
   -batch              Process all media files in input directory
   -recursive          Process subdirectories in batch mode
+  -workers int        Parallel workers for batch mode (0 = auto)
+
+Output Control:
+  -verbose            Enable verbose/debug output
+  -quiet              Suppress non-error output
+  -version            Show version information
 
 Other:
   -ffmpeg-path string Path to ffmpeg binary (default "ffmpeg")
 ```
+
+## Features
+
+### Modern CLI Features
+
+- **Structured Logging**: Uses Go's `slog` for structured, leveled logging
+- **Graceful Shutdown**: Handles SIGINT/SIGTERM for clean interruption
+- **Progress Bar**: Visual progress for model downloads
+- **Parallel Batch Processing**: Process multiple files concurrently
+- **Version Information**: Build-time version injection with `-version`
+- **Context Support**: Cancellation-aware processing throughout
+
+### List Available Models
+
+```bash
+./opencaption -list-models
+```
+
+Output:
+```
+Available Whisper models:
+
+NAME               SIZE       MULTILINGUAL DESCRIPTION
+----------------------------------------------------------------------
+tiny               ~75MB      Yes          Fastest, lowest accuracy
+tiny.en            ~75MB      No           Fastest, English only
+base               ~142MB     Yes          Fast, good accuracy
+base.en            ~142MB     No           Fast, English only
+small              ~466MB     Yes          Balanced speed/accuracy
+small.en           ~466MB     No           Balanced, English only
+medium             ~1.5GB     Yes          High accuracy
+medium.en          ~1.5GB     No           High accuracy, English only
+large-v3           ~3GB       Yes          Best accuracy
+large-v3-turbo     ~1.6GB     Yes          Fast large model
+```
+
+## Development
+
+### Running Tests
+
+```bash
+# Run tests without CGO (packages that don't require whisper.cpp)
+CGO_ENABLED=0 go test -v ./internal/...
+
+# Run with race detection
+CGO_ENABLED=0 go test -race ./internal/config/... ./internal/batch/...
+```
+
+### Building with Version Information
+
+```bash
+go build -ldflags="-X opencaption/internal/version.Version=1.0.0 \
+  -X opencaption/internal/version.Commit=$(git rev-parse --short HEAD) \
+  -X opencaption/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -o opencaption ./cmd/opencaption
+```
+
+### Code Quality
+
+The project uses:
+- `gofmt` for code formatting
+- `golangci-lint` for comprehensive linting
+- Race detection in tests
+- Code coverage reporting
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.

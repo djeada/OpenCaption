@@ -1,8 +1,10 @@
 package models
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -10,6 +12,18 @@ func TestDefaultModelDir(t *testing.T) {
 	dir := DefaultModelDir()
 	if dir == "" {
 		t.Error("DefaultModelDir should not return empty string")
+	}
+}
+
+func TestDefaultModelDirXDG(t *testing.T) {
+	// Test XDG_DATA_HOME override
+	oldVal := os.Getenv("XDG_DATA_HOME")
+	defer os.Setenv("XDG_DATA_HOME", oldVal)
+
+	os.Setenv("XDG_DATA_HOME", "/custom/data")
+	dir := DefaultModelDir()
+	if dir != "/custom/data/opencaption/models" {
+		t.Errorf("DefaultModelDir with XDG_DATA_HOME = %q, want %q", dir, "/custom/data/opencaption/models")
 	}
 }
 
@@ -38,6 +52,48 @@ func TestKnownModels(t *testing.T) {
 	}
 }
 
+func TestModelCatalog(t *testing.T) {
+	// Check that catalog entries match known models
+	for name := range ModelCatalog {
+		if _, ok := KnownModels[name]; !ok {
+			t.Errorf("ModelCatalog entry %q not in KnownModels", name)
+		}
+	}
+}
+
+func TestGetModelInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"tiny", true},
+		{"base.en", true},
+		{"large-v3", true},
+		{"unknown", false},
+		{"ggml-tiny.bin", true}, // Should normalize
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ok := GetModelInfo(tt.name)
+			if ok != tt.want {
+				t.Errorf("GetModelInfo(%q) ok = %v, want %v", tt.name, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestListKnownModels(t *testing.T) {
+	list := ListKnownModels()
+	if list == "" {
+		t.Error("ListKnownModels should return non-empty string")
+	}
+	// Should contain some known models
+	if !strings.Contains(list, "tiny") {
+		t.Errorf("ListKnownModels should contain 'tiny', got: %s", list)
+	}
+}
+
 func TestResolveModelExistingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -54,6 +110,25 @@ func TestResolveModelExistingFile(t *testing.T) {
 	}
 	if resolved != modelPath {
 		t.Errorf("ResolveModel = %q, want %q", resolved, modelPath)
+	}
+}
+
+func TestResolveModelWithContext(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a mock model file
+	modelPath := filepath.Join(tmpDir, "ggml-test.bin")
+	if err := os.WriteFile(modelPath, []byte("mock model"), 0644); err != nil {
+		t.Fatalf("Failed to create mock model: %v", err)
+	}
+
+	ctx := context.Background()
+	resolved, err := ResolveModelWithContext(ctx, modelPath, "", false)
+	if err != nil {
+		t.Fatalf("ResolveModelWithContext failed: %v", err)
+	}
+	if resolved != modelPath {
+		t.Errorf("ResolveModelWithContext = %q, want %q", resolved, modelPath)
 	}
 }
 
@@ -142,6 +217,13 @@ func TestListAvailable(t *testing.T) {
 	for _, m := range available {
 		if m == "readme.txt" {
 			t.Error("ListAvailable should not include non-model files")
+		}
+	}
+
+	// Check that results are sorted
+	for i := 1; i < len(available); i++ {
+		if available[i-1] > available[i] {
+			t.Error("ListAvailable results should be sorted")
 		}
 	}
 }

@@ -1,12 +1,17 @@
 package models
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 // Known models with their download URLs (Hugging Face mirrors)
@@ -28,8 +33,35 @@ var KnownModels = map[string]string{
 	"distil-large-v2":  "https://huggingface.co/distil-whisper/distil-large-v2/resolve/main/ggml-large-32-2.bin",
 }
 
+// ModelInfo contains information about a model.
+type ModelInfo struct {
+	Name         string
+	Size         string
+	Description  string
+	Multilingual bool
+}
+
+// ModelCatalog provides model information.
+var ModelCatalog = map[string]ModelInfo{
+	"tiny":           {Name: "tiny", Size: "~75MB", Description: "Fastest, lowest accuracy", Multilingual: true},
+	"tiny.en":        {Name: "tiny.en", Size: "~75MB", Description: "Fastest, English only", Multilingual: false},
+	"base":           {Name: "base", Size: "~142MB", Description: "Fast, good accuracy", Multilingual: true},
+	"base.en":        {Name: "base.en", Size: "~142MB", Description: "Fast, English only", Multilingual: false},
+	"small":          {Name: "small", Size: "~466MB", Description: "Balanced speed/accuracy", Multilingual: true},
+	"small.en":       {Name: "small.en", Size: "~466MB", Description: "Balanced, English only", Multilingual: false},
+	"medium":         {Name: "medium", Size: "~1.5GB", Description: "High accuracy", Multilingual: true},
+	"medium.en":      {Name: "medium.en", Size: "~1.5GB", Description: "High accuracy, English only", Multilingual: false},
+	"large-v3":       {Name: "large-v3", Size: "~3GB", Description: "Best accuracy", Multilingual: true},
+	"large-v3-turbo": {Name: "large-v3-turbo", Size: "~1.6GB", Description: "Fast large model", Multilingual: true},
+}
+
 // DefaultModelDir returns the default model directory path.
 func DefaultModelDir() string {
+	// Check XDG_DATA_HOME first (modern standard)
+	if xdgData := os.Getenv("XDG_DATA_HOME"); xdgData != "" {
+		return filepath.Join(xdgData, "opencaption", "models")
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "./models"
@@ -40,6 +72,11 @@ func DefaultModelDir() string {
 // ResolveModel resolves a model name or path to an actual file path.
 // If modelDir is provided and the model doesn't exist, it will attempt to download it.
 func ResolveModel(model, modelDir string, autoDownload bool) (string, error) {
+	return ResolveModelWithContext(context.Background(), model, modelDir, autoDownload)
+}
+
+// ResolveModelWithContext resolves a model with context for cancellation.
+func ResolveModelWithContext(ctx context.Context, model, modelDir string, autoDownload bool) (string, error) {
 	// If model is an absolute path or exists, use it directly
 	if filepath.IsAbs(model) {
 		if _, err := os.Stat(model); err == nil {
@@ -71,22 +108,22 @@ func ResolveModel(model, modelDir string, autoDownload bool) (string, error) {
 
 		// If autoDownload is enabled, try to download
 		if autoDownload {
-			return downloadModel(model, modelDir)
+			return downloadModelWithContext(ctx, model, modelDir)
 		}
 	}
 
 	return "", fmt.Errorf("model not found: %s (use --model-dir or provide full path)", model)
 }
 
-// downloadModel downloads a model to the specified directory.
-func downloadModel(model, modelDir string) (string, error) {
+// downloadModelWithContext downloads a model with context support.
+func downloadModelWithContext(ctx context.Context, model, modelDir string) (string, error) {
 	// Normalize model name
 	name := strings.TrimSuffix(filepath.Base(model), ".bin")
 	name = strings.TrimPrefix(name, "ggml-")
 
 	url, ok := KnownModels[name]
 	if !ok {
-		return "", fmt.Errorf("unknown model: %s (known: %s)", name, listKnownModels())
+		return "", fmt.Errorf("unknown model: %s\nAvailable models: %s", name, ListKnownModels())
 	}
 
 	// Create model directory
@@ -103,10 +140,17 @@ func downloadModel(model, modelDir string) (string, error) {
 		return destPath, nil
 	}
 
-	fmt.Fprintf(os.Stderr, "Downloading model %s...\n", name)
+	// Create HTTP request with context
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
 
-	// Download with progress
-	resp, err := http.Get(url)
+	// Use a client without overall timeout - context handles cancellation
+	// Large models (3GB+) can take over an hour on slow connections
+	client := &http.Client{}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download model: %w", err)
 	}
@@ -123,12 +167,30 @@ func downloadModel(model, modelDir string) (string, error) {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
 
-	// Copy with progress reporting
-	written, err := io.Copy(out, &progressReader{r: resp.Body, total: resp.ContentLength})
+	// Create progress bar
+	bar := progressbar.NewOptions64(
+		resp.ContentLength,
+		progressbar.OptionSetDescription(fmt.Sprintf("Downloading %s", name)),
+		progressbar.OptionSetWriter(os.Stderr),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionSetWidth(40),
+		progressbar.OptionThrottle(100*time.Millisecond),
+		progressbar.OptionShowCount(),
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
+		progressbar.OptionSpinnerType(14),
+		progressbar.OptionFullWidth(),
+		progressbar.OptionSetRenderBlankState(true),
+	)
+
+	// Copy with progress
+	written, copyErr := io.Copy(io.MultiWriter(out, bar), resp.Body)
 	out.Close()
-	if err != nil {
+
+	if copyErr != nil {
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("download model: %w", err)
+		return "", fmt.Errorf("download model: %w", copyErr)
 	}
 
 	// Rename to final path
@@ -137,36 +199,17 @@ func downloadModel(model, modelDir string) (string, error) {
 		return "", fmt.Errorf("rename model file: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "\nDownloaded %s (%.1f MB)\n", destName, float64(written)/1024/1024)
+	fmt.Fprintf(os.Stderr, "Downloaded %s (%.1f MB)\n", destName, float64(written)/1024/1024)
 	return destPath, nil
 }
 
-type progressReader struct {
-	r       io.Reader
-	total   int64
-	current int64
-	lastPct int
-}
-
-func (pr *progressReader) Read(p []byte) (int, error) {
-	n, err := pr.r.Read(p)
-	pr.current += int64(n)
-
-	if pr.total > 0 {
-		pct := int(100 * pr.current / pr.total)
-		if pct != pr.lastPct && pct%5 == 0 {
-			fmt.Fprintf(os.Stderr, "\rDownloading... %d%%", pct)
-			pr.lastPct = pct
-		}
-	}
-	return n, err
-}
-
-func listKnownModels() string {
+// ListKnownModels returns a formatted list of known models.
+func ListKnownModels() string {
 	var names []string
 	for k := range KnownModels {
 		names = append(names, k)
 	}
+	sort.Strings(names)
 	return strings.Join(names, ", ")
 }
 
@@ -194,5 +237,16 @@ func ListAvailable(modelDir string) ([]string, error) {
 			models = append(models, name)
 		}
 	}
+	sort.Strings(models)
 	return models, nil
+}
+
+// GetModelInfo returns information about a model.
+func GetModelInfo(name string) (ModelInfo, bool) {
+	// Normalize name
+	name = strings.TrimSuffix(name, ".bin")
+	name = strings.TrimPrefix(name, "ggml-")
+
+	info, ok := ModelCatalog[name]
+	return info, ok
 }

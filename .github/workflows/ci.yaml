@@ -8,12 +8,18 @@ on:
   pull_request:
     branches: [main, master]
 
+env:
+  GO_VERSION: '1.23'
+
 jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      matrix:
+        go-version: ['1.22', '1.23']
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,7 +27,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: ${{ matrix.go-version }}
           cache: true
 
       - name: Install dependencies
@@ -35,7 +41,14 @@ jobs:
       - name: Run tests (no cgo)
         run: |
           # Run tests for packages that don't require whisper.cpp
-          CGO_ENABLED=0 go test -v ./internal/config/... ./internal/batch/... ./internal/device/... ./internal/models/...
+          CGO_ENABLED=0 go test -v -race -coverprofile=coverage.out ./internal/config/... ./internal/batch/... ./internal/device/... ./internal/models/... ./internal/version/... ./internal/logging/...
+
+      - name: Upload coverage
+        if: matrix.go-version == '1.23'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
 
   lint:
     name: Lint
@@ -49,8 +62,16 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+          skip-pkg-cache: true
+        continue-on-error: true
 
       - name: Run gofmt
         run: |
@@ -64,7 +85,7 @@ jobs:
       - name: Run go vet (syntax check only)
         run: |
           # Check Go syntax without cgo (whisper.cpp headers not available)
-          for pkg in ./internal/config ./internal/batch ./internal/device ./internal/models; do
+          for pkg in ./internal/config ./internal/batch ./internal/device ./internal/models ./internal/version ./internal/logging; do
             CGO_ENABLED=0 go vet "$pkg/..."
           done
 
@@ -80,7 +101,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Install build dependencies
@@ -101,12 +122,13 @@ jobs:
           export WHISPER_CPP=$HOME/whisper.cpp
           export CGO_CFLAGS="-I$WHISPER_CPP/include -I$WHISPER_CPP/ggml/include"
           export CGO_LDFLAGS="-L$WHISPER_CPP/build/src -L$WHISPER_CPP/build/ggml/src"
-          go build -o opencaption ./cmd/opencaption
+          go build -ldflags="-X opencaption/internal/version.Version=$(git describe --tags --always --dirty) -X opencaption/internal/version.Commit=$(git rev-parse --short HEAD) -X opencaption/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o opencaption ./cmd/opencaption
 
       - name: Verify binary
         run: |
           ls -la opencaption
           file opencaption
+          ./opencaption -version || true
 
   release:
     name: Release
@@ -118,11 +140,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Install build dependencies
@@ -143,7 +167,8 @@ jobs:
           export WHISPER_CPP=$HOME/whisper.cpp
           export CGO_CFLAGS="-I$WHISPER_CPP/include -I$WHISPER_CPP/ggml/include"
           export CGO_LDFLAGS="-L$WHISPER_CPP/build/src -L$WHISPER_CPP/build/ggml/src -Wl,-rpath,\$ORIGIN/lib"
-          go build -ldflags="-s -w" -o opencaption ./cmd/opencaption
+          export VERSION=${GITHUB_REF#refs/tags/}
+          go build -ldflags="-s -w -X opencaption/internal/version.Version=$VERSION -X opencaption/internal/version.Commit=$(git rev-parse --short HEAD) -X opencaption/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o opencaption ./cmd/opencaption
 
       - name: Package release
         run: |
@@ -155,7 +180,7 @@ jobs:
           cd release && tar -czf ../opencaption-linux-amd64.tar.gz *
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: opencaption-linux-amd64.tar.gz
           generate_release_notes: true
