@@ -163,6 +163,8 @@ func applyFlags(cfg *config.Config) {
 			cfg.Threads = *threads
 		case "batch":
 			cfg.BatchMode = *batchMode
+		case "recursive":
+			cfg.Recursive = *recursive
 		}
 	})
 
@@ -293,7 +295,7 @@ func runBatch(cfg *config.Config) {
 		outDir = cfg.Input
 	}
 
-	jobs, err := batch.ScanDirectory(cfg.Input, outDir, cfg.Format, *recursive)
+	jobs, err := batch.ScanDirectory(cfg.Input, outDir, cfg.Format, cfg.Recursive)
 	if err != nil {
 		fail(err)
 	}

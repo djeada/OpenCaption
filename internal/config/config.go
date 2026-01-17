@@ -37,6 +37,7 @@ type Config struct {
 	Format    string `json:"format" yaml:"format"`
 	Threads   int    `json:"threads" yaml:"threads"`
 	BatchMode bool   `json:"batch" yaml:"batch"`
+	Recursive bool   `json:"recursive" yaml:"recursive"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.

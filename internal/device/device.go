@@ -86,8 +86,13 @@ func detectGPU() string {
 
 // detectCUDA checks for NVIDIA CUDA support.
 func detectCUDA() string {
-	// Check if nvidia-smi is available
-	cmd := exec.Command("nvidia-smi", "--query-gpu=name", "--format=csv,noheader,nounits")
+	// Look up nvidia-smi in PATH for security
+	nvidiaSmi, err := exec.LookPath("nvidia-smi")
+	if err != nil {
+		return ""
+	}
+
+	cmd := exec.Command(nvidiaSmi, "--query-gpu=name", "--format=csv,noheader,nounits")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -104,11 +109,17 @@ func detectCUDA() string {
 // detectMetal checks for Apple Metal support.
 func detectMetal() string {
 	// Metal is available on macOS 10.11+
-	// Check if system_profiler can report GPU info
-	cmd := exec.Command("system_profiler", "SPDisplaysDataType")
+	// Look up system_profiler in PATH for security
+	sysProfiler, err := exec.LookPath("system_profiler")
+	if err != nil {
+		// Fallback: assume Metal is available on macOS
+		return "Metal: Apple GPU"
+	}
+
+	cmd := exec.Command(sysProfiler, "SPDisplaysDataType")
 	out, err := cmd.Output()
 	if err != nil {
-		return ""
+		return "Metal: Apple GPU"
 	}
 
 	// Look for GPU chipset info
@@ -128,8 +139,13 @@ func detectMetal() string {
 
 // detectVulkan checks for Vulkan support.
 func detectVulkan() string {
-	// Check if vulkaninfo is available
-	cmd := exec.Command("vulkaninfo", "--summary")
+	// Look up vulkaninfo in PATH for security
+	vulkanInfo, err := exec.LookPath("vulkaninfo")
+	if err != nil {
+		return ""
+	}
+
+	cmd := exec.Command(vulkanInfo, "--summary")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

@@ -21,7 +21,7 @@ func TestKnownModels(t *testing.T) {
 		"small", "small.en",
 		"medium", "medium.en",
 		"large-v1", "large-v2", "large-v3", "large",
-		"turbo",
+		"large-v3-turbo",
 	}
 
 	for _, model := range expectedModels {

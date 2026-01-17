@@ -23,7 +23,7 @@ var KnownModels = map[string]string{
 	"large-v2":         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v2.bin",
 	"large-v3":         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
 	"large":            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
-	"turbo":            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
+	"large-v3-turbo":   "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin",
 	"distil-medium.en": "https://huggingface.co/distil-whisper/distil-medium.en/resolve/main/ggml-medium-32-2.en.bin",
 	"distil-large-v2":  "https://huggingface.co/distil-whisper/distil-large-v2/resolve/main/ggml-large-32-2.bin",
 }
