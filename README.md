@@ -11,7 +11,7 @@
 [Features](#-features) •
 [Quick Start](#-quick-start) •
 [Installation](#-installation) •
-[Documentation](#-documentation) •
+[GPU Acceleration](#-gpu-acceleration) •
 [Examples](#-examples)
 
 </div>
@@ -49,7 +49,7 @@ make build
 
 ## 📋 Requirements
 
-- **FFmpeg** - Must be in PATH or specify with `--ffmpeg-path`
+- **FFmpeg** - Must be in PATH or specify with `-ffmpeg-path`
 - **Go 1.23+** - For building from source
 - **whisper.cpp** - Headers and libraries (automatically handled by build process)
 
