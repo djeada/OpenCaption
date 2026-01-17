@@ -1,6 +1,7 @@
 package format
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -8,6 +9,60 @@ import (
 
 	"opencaption/internal/captions"
 )
+
+// JSONCue represents a cue in JSON output format.
+type JSONCue struct {
+	Index    int      `json:"index"`
+	Start    float64  `json:"start"`
+	End      float64  `json:"end"`
+	StartStr string   `json:"start_formatted"`
+	EndStr   string   `json:"end_formatted"`
+	Text     string   `json:"text"`
+	Lines    []string `json:"lines"`
+}
+
+// JSONOutput represents the complete JSON output structure.
+type JSONOutput struct {
+	Version  string    `json:"version"`
+	Format   string    `json:"format"`
+	CueCount int       `json:"cue_count"`
+	Duration float64   `json:"duration_seconds,omitempty"`
+	Cues     []JSONCue `json:"cues"`
+}
+
+// WriteJSON writes cues as JSON.
+func WriteJSON(w io.Writer, cues []captions.Cue) error {
+	output := JSONOutput{
+		Version:  "1.0",
+		Format:   "opencaption",
+		CueCount: len(cues),
+		Cues:     make([]JSONCue, len(cues)),
+	}
+
+	var maxEnd float64
+	for i, c := range cues {
+		startSec := c.Start.Seconds()
+		endSec := c.End.Seconds()
+		if endSec > maxEnd {
+			maxEnd = endSec
+		}
+
+		output.Cues[i] = JSONCue{
+			Index:    c.Idx,
+			Start:    startSec,
+			End:      endSec,
+			StartStr: tsVTT(c.Start),
+			EndStr:   tsVTT(c.End),
+			Text:     c.RawText,
+			Lines:    c.Lines,
+		}
+	}
+	output.Duration = maxEnd
+
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(output)
+}
 
 func tsVTT(t time.Duration) string {
 	if t < 0 {

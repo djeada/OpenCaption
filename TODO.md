@@ -16,17 +16,17 @@
 - [x] Improve overlap de-duplication with fuzzy matching.
 - [x] Smarter cue splitting with punctuation awareness.
 
-## Milestone 4: Performance + GPU
-- [ ] Add `--device auto|cpu|gpu` with detection and fallback.
-- [ ] Document GPU build steps for whisper.cpp backends.
-- [ ] Add `--model-dir` and model auto-download.
+## Milestone 4: Performance + GPU (done)
+- [x] Add `--device auto|cpu|gpu` with detection and fallback.
+- [x] Document GPU build steps for whisper.cpp backends.
+- [x] Add `--model-dir` and model auto-download.
 
-## Milestone 5: CLI UX + Config
-- [ ] Add config file support and presets.
-- [ ] Add batch mode for directories.
-- [ ] Add `json` output format.
+## Milestone 5: CLI UX + Config (done)
+- [x] Add config file support and presets.
+- [x] Add batch mode for directories.
+- [x] Add `json` output format.
 
-## Milestone 6: Release Quality
-- [ ] Unit tests for formatting and wrapping.
-- [ ] Integration tests with short audio fixtures.
-- [ ] CI for build/test and versioned releases.
+## Milestone 6: Release Quality (done)
+- [x] Unit tests for formatting and wrapping.
+- [x] Integration tests with short audio fixtures.
+- [x] CI for build/test and versioned releases.
