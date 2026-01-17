@@ -1,35 +1,101 @@
-# OpenCaption
+<div align="center">
 
-OpenCaption is a CLI tool for generating captions from audio or video using
-whisper.cpp.
+# 🎬 OpenCaption
 
-## Requirements
+**Professional audio and video transcription powered by whisper.cpp**
 
-- ffmpeg in PATH (or use `--ffmpeg-path`)
-- Go 1.23+ for building
-- whisper.cpp headers + libraries (see Model setup)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](go.mod)
+[![Built with whisper.cpp](https://img.shields.io/badge/whisper.cpp-powered-green)](https://github.com/ggerganov/whisper.cpp)
 
-## Build
+[Features](#features) •
+[Quick Start](#quick-start) •
+[Installation](#installation) •
+[GPU Acceleration](#gpu-acceleration) •
+[Examples](#examples)
+
+</div>
+
+---
+
+## 📖 About
+
+OpenCaption is a powerful command-line tool that generates accurate captions and subtitles from audio and video files. Built on top of whisper.cpp, it offers fast, GPU-accelerated transcription with support for multiple output formats and batch processing capabilities.
+
+## ✨ Features
+
+- 🚀 **High Performance** - GPU acceleration via CUDA, Metal, or Vulkan
+- 📦 **Multiple Formats** - Export to VTT, SRT, or JSON
+- 🔄 **Batch Processing** - Process multiple files in parallel
+- 🎯 **Smart Chunking** - Automatic VAD for optimal segmentation
+- ⚙️ **Flexible Configuration** - Config files, presets, and CLI options
+- 🌍 **Multi-language Support** - All whisper.cpp supported languages
+- 📥 **Auto Download** - Automatic model downloading and management
+- 💻 **Cross-platform** - Works on Linux, macOS, and Windows
+
+## 🚀 Quick Start
 
 ```bash
+# Download and install
+make setup MODEL=base.en
+make build
+
+# Transcribe a video
+./opencaption -in video.mp4 -out captions.vtt
+
+# Use automatic model download
+./opencaption -in video.mp4 -model base.en -model-dir ~/.opencaption/models
+```
+
+## 📋 Requirements
+
+- **FFmpeg** - Must be in PATH or specify with `-ffmpeg-path`
+- **Go 1.23+** - For building from source
+- **whisper.cpp** - Headers and libraries (automatically handled by build process)
+
+## 🔧 Installation
+
+### Building from Source
+
+```bash
+# Basic build
 make build
 ```
 
-If your whisper.cpp checkout is elsewhere, set `WHISPER_CPP`:
+### Custom whisper.cpp Location
+
+If your whisper.cpp checkout is in a non-standard location:
 
 ```bash
 WHISPER_CPP=/path/to/whisper.cpp make build
 ```
 
-## Model setup
+### Model Setup
+
+Download a whisper model:
 
 ```bash
 make setup MODEL=base.en
 ```
 
-### Automatic model download
+### Available Models
 
-OpenCaption can automatically download models when using `--model-dir`:
+| Model | Size | Multilingual | Best For |
+|-------|------|--------------|----------|
+| `tiny` | ~75MB | ✅ Yes | Quick testing, low resources |
+| `tiny.en` | ~75MB | ❌ English only | Fast English transcription |
+| `base` | ~142MB | ✅ Yes | Balanced speed/accuracy |
+| `base.en` | ~142MB | ❌ English only | Recommended for English |
+| `small` | ~466MB | ✅ Yes | Good accuracy, moderate speed |
+| `small.en` | ~466MB | ❌ English only | High quality English |
+| `medium` | ~1.5GB | ✅ Yes | High accuracy |
+| `medium.en` | ~1.5GB | ❌ English only | Best English quality |
+| `large-v3` | ~3GB | ✅ Yes | Maximum accuracy |
+| `turbo` | ~1.6GB | ✅ Yes | Fast large model |
+
+### Automatic Model Download
+
+OpenCaption can automatically download models when needed:
 
 ```bash
 ./opencaption -in "talk.mp4" \
@@ -37,17 +103,15 @@ OpenCaption can automatically download models when using `--model-dir`:
   -model-dir ~/.local/share/opencaption/models
 ```
 
-Available models: `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`,
-`medium`, `medium.en`, `large-v1`, `large-v2`, `large-v3`, `turbo`
+---
 
-## GPU Acceleration
+## 🎮 GPU Acceleration
 
-OpenCaption supports GPU acceleration through whisper.cpp. GPU support is
-determined at compile time based on how whisper.cpp was built.
+OpenCaption supports GPU acceleration for faster transcription. GPU support is determined at compile time based on your whisper.cpp build configuration.
 
-### NVIDIA CUDA (Linux/Windows)
+### 🟢 NVIDIA CUDA (Linux/Windows)
 
-Build whisper.cpp with CUDA support:
+1. Build whisper.cpp with CUDA:
 
 ```bash
 cd whisper.cpp
@@ -56,15 +120,15 @@ cmake .. -DGGML_CUDA=ON
 cmake --build . --config Release -j
 ```
 
-Then build OpenCaption:
+2. Build OpenCaption:
 
 ```bash
 WHISPER_CPP=/path/to/whisper.cpp make build
 ```
 
-### Apple Metal (macOS)
+### 🍎 Apple Metal (macOS)
 
-Metal is enabled by default on macOS builds:
+1. Build whisper.cpp with Metal (default on macOS):
 
 ```bash
 cd whisper.cpp
@@ -73,9 +137,11 @@ cmake .. -DGGML_METAL=ON
 cmake --build . --config Release -j
 ```
 
-### Vulkan (Cross-platform)
+2. Build OpenCaption as usual
 
-Build whisper.cpp with Vulkan support:
+### 🌋 Vulkan (Cross-platform)
+
+1. Build whisper.cpp with Vulkan:
 
 ```bash
 cd whisper.cpp
@@ -84,9 +150,11 @@ cmake .. -DGGML_VULKAN=ON
 cmake --build . --config Release -j
 ```
 
-### Using Device Selection
+2. Build OpenCaption as usual
 
-Use the `--device` flag to control compute device:
+### Device Selection
+
+Control which compute device to use:
 
 ```bash
 # Automatic selection (GPU if available, else CPU)
@@ -99,7 +167,11 @@ Use the `--device` flag to control compute device:
 ./opencaption -in "talk.mp4" -device gpu
 ```
 
-## Example
+---
+
+## 📚 Examples
+
+### Basic Usage
 
 ```bash
 ./opencaption -in "talk.mp4" \
@@ -110,35 +182,37 @@ Use the `--device` flag to control compute device:
   -format vtt
 ```
 
-Run via make (handles library paths):
+### Using Make (Handles Library Paths)
 
 ```bash
 make run RUN_ARGS='-in "talk.mp4" -out "talk.vtt" -model "$HOME/.local/src/whisper.cpp/models/ggml-base.en.bin"'
 ```
 
-Write to stdout:
+### Write to stdout
 
 ```bash
 ./opencaption -in "talk.mp4" -out - -format srt
 ```
 
-Read from stdin:
+### Read from stdin
 
 ```bash
 cat audio.wav | ./opencaption -in - -out captions.vtt
 ```
 
-Disable VAD:
+### Disable VAD
 
 ```bash
 ./opencaption -in "talk.mp4" -out "talk.vtt" -vad=false
 ```
 
-## Configuration
+---
 
-### Config File
+## ⚙️ Configuration
 
-Create a config file (JSON or YAML) to store your preferred settings:
+### Configuration Files
+
+Store your preferred settings in a config file (JSON or YAML):
 
 **config.yaml:**
 ```yaml
@@ -169,9 +243,9 @@ Use with:
 ./opencaption -config config.yaml -in "talk.mp4"
 ```
 
-### Presets
+### Built-in Presets
 
-Use built-in presets for common use cases:
+Quick configuration with presets:
 
 ```bash
 # Fast transcription (uses tiny model)
@@ -184,9 +258,11 @@ Use built-in presets for common use cases:
 ./opencaption -preset subtitle -in "talk.mp4"
 ```
 
-## Batch Processing
+---
 
-Process all media files in a directory:
+## 📦 Batch Processing
+
+Process multiple files efficiently:
 
 ```bash
 # Process all files in a directory
@@ -196,13 +272,19 @@ Process all media files in a directory:
 ./opencaption -batch -recursive -in ./videos/ -out ./captions/
 ```
 
-## Output Formats
+---
 
-OpenCaption supports multiple output formats:
+## 📄 Output Formats
 
-- **VTT** (WebVTT): Default format, suitable for web video
-- **SRT** (SubRip): Common subtitle format
-- **JSON**: Machine-readable format with metadata
+OpenCaption supports multiple caption formats:
+
+| Format | Extension | Use Case |
+|--------|-----------|----------|
+| **VTT** | `.vtt` | Web video (HTML5), default format |
+| **SRT** | `.srt` | Common subtitle format, wide compatibility |
+| **JSON** | `.json` | Machine-readable, includes metadata |
+
+### Format Examples
 
 ```bash
 # VTT output
@@ -237,87 +319,76 @@ OpenCaption supports multiple output formats:
 }
 ```
 
-## CLI Reference
+---
 
-```
-Usage: opencaption [options]
+## 🔍 CLI Reference
 
-Input/Output:
-  -in string          Input audio/video file or directory (for batch mode)
-  -out string         Output captions file (.vtt, .srt, .json) or directory
-  -format string      Caption format: vtt | srt | json (default "vtt")
+### Input/Output Options
 
-Model:
-  -model string       Path to ggml/gguf model or model name
-  -model-dir string   Directory for model files (enables auto-download)
-  -list-models        List available models with descriptions
+| Flag | Type | Description |
+|------|------|-------------|
+| `-in` | string | Input audio/video file or directory (for batch mode) |
+| `-out` | string | Output captions file (.vtt, .srt, .json) or directory |
+| `-format` | string | Caption format: `vtt` \| `srt` \| `json` (default: `vtt`) |
 
-Processing:
-  -lang string        Language (e.g. 'en'); empty = auto
-  -vad                Enable simple energy-based VAD (default true)
-  -window int         Chunk window seconds (0 = whole file) (default 60)
-  -overlap int        Chunk overlap seconds (default 1)
-  -threads int        Threads (0 = auto)
-  -device string      Compute device: auto | cpu | gpu (default "auto")
+### Model Options
 
-Formatting:
-  -maxchars int       Max characters per line (default 42)
-  -maxlines int       Max lines per cue (default 2)
+| Flag | Type | Description |
+|------|------|-------------|
+| `-model` | string | Path to ggml/gguf model or model name |
+| `-model-dir` | string | Directory for model files (enables auto-download) |
+| `-list-models` | flag | List available models with descriptions |
 
-Configuration:
-  -config string      Path to config file (.json or .yaml)
-  -preset string      Use preset: fast | accurate | subtitle
+### Processing Options
 
-Batch Processing:
-  -batch              Process all media files in input directory
-  -recursive          Process subdirectories in batch mode
-  -workers int        Parallel workers for batch mode (0 = auto)
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `-lang` | string | auto | Language code (e.g., 'en') |
+| `-vad` | bool | `true` | Enable simple energy-based VAD |
+| `-window` | int | `60` | Chunk window seconds (0 = whole file) |
+| `-overlap` | int | `1` | Chunk overlap seconds |
+| `-threads` | int | auto | Number of threads (0 = auto) |
+| `-device` | string | `auto` | Compute device: `auto` \| `cpu` \| `gpu` |
 
-Output Control:
-  -verbose            Enable verbose/debug output
-  -quiet              Suppress non-error output
-  -version            Show version information
+### Formatting Options
 
-Other:
-  -ffmpeg-path string Path to ffmpeg binary (default "ffmpeg")
-```
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `-maxchars` | int | `42` | Max characters per line |
+| `-maxlines` | int | `2` | Max lines per cue |
 
-## Features
+### Configuration Options
 
-### Modern CLI Features
+| Flag | Type | Description |
+|------|------|-------------|
+| `-config` | string | Path to config file (.json or .yaml) |
+| `-preset` | string | Use preset: `fast` \| `accurate` \| `subtitle` |
 
-- **Structured Logging**: Uses Go's `slog` for structured, leveled logging
-- **Graceful Shutdown**: Handles SIGINT/SIGTERM for clean interruption
-- **Progress Bar**: Visual progress for model downloads
-- **Parallel Batch Processing**: Process multiple files concurrently
-- **Version Information**: Build-time version injection with `-version`
-- **Context Support**: Cancellation-aware processing throughout
+### Batch Processing Options
 
-### List Available Models
+| Flag | Type | Description |
+|------|------|-------------|
+| `-batch` | flag | Process all media files in input directory |
+| `-recursive` | flag | Process subdirectories in batch mode |
+| `-workers` | int | Parallel workers for batch mode (0 = auto) |
 
-```bash
-./opencaption -list-models
-```
+### Output Control Options
 
-Output:
-```
-Available Whisper models:
+| Flag | Description |
+|------|-------------|
+| `-verbose` | Enable verbose/debug output |
+| `-quiet` | Suppress non-error output |
+| `-version` | Show version information |
 
-NAME               SIZE       MULTILINGUAL DESCRIPTION
-----------------------------------------------------------------------
-tiny               ~75MB      Yes          Fastest, lowest accuracy
-tiny.en            ~75MB      No           Fastest, English only
-base               ~142MB     Yes          Fast, good accuracy
-base.en            ~142MB     No           Fast, English only
-small              ~466MB     Yes          Balanced speed/accuracy
-small.en           ~466MB     No           Balanced, English only
-medium             ~1.5GB     Yes          High accuracy
-medium.en          ~1.5GB     No           High accuracy, English only
-large-v3           ~3GB       Yes          Best accuracy
-large-v3-turbo     ~1.6GB     Yes          Fast large model
-```
+### Other Options
 
-## Development
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `-ffmpeg-path` | string | `ffmpeg` | Path to ffmpeg binary |
+
+---
+
+## 🛠️ Development
 
 ### Running Tests
 
@@ -340,12 +411,34 @@ go build -ldflags="-X opencaption/internal/version.Version=1.0.0 \
 
 ### Code Quality
 
-The project uses:
-- `gofmt` for code formatting
-- `golangci-lint` for comprehensive linting
-- Race detection in tests
-- Code coverage reporting
+The project maintains high code quality standards:
 
-## License
+- ✅ `gofmt` for consistent code formatting
+- ✅ `golangci-lint` for comprehensive linting
+- ✅ Race detection in tests
+- ✅ Code coverage reporting
 
-MIT License - see [LICENSE](LICENSE) for details.
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- Built on [whisper.cpp](https://github.com/ggerganov/whisper.cpp) by Georgi Gerganov
+- Powered by OpenAI's Whisper model
+
+---
+
+<div align="center">
+
+**[⬆ Back to Top](#opencaption)**
+
+Made with ❤️ by [Adam Djellouli](https://github.com/djeada)
+
+</div>
