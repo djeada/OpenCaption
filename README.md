@@ -8,11 +8,11 @@
 [![Go Version](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](go.mod)
 [![Built with whisper.cpp](https://img.shields.io/badge/whisper.cpp-powered-green)](https://github.com/ggerganov/whisper.cpp)
 
-[Features](#-features) •
-[Quick Start](#-quick-start) •
-[Installation](#-installation) •
-[GPU Acceleration](#-gpu-acceleration) •
-[Examples](#-examples)
+[Features](#features) •
+[Quick Start](#quick-start) •
+[Installation](#installation) •
+[GPU Acceleration](#gpu-acceleration) •
+[Examples](#examples)
 
 </div>
 
@@ -437,7 +437,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-**[⬆ Back to Top](#-opencaption)**
+**[⬆ Back to Top](#opencaption)**
 
 Made with ❤️ by [Adam Djellouli](https://github.com/djeada)
 
