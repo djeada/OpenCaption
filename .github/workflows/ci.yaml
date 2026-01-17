@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run tests (no cgo)
+        run: |
+          # Run tests for packages that don't require whisper.cpp
+          CGO_ENABLED=0 go test -v ./internal/config/... ./internal/batch/... ./internal/device/... ./internal/models/...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Run gofmt
+        run: |
+          output=$(gofmt -l cmd internal)
+          if [ -n "$output" ]; then
+            echo "The following files are not formatted:"
+            echo "$output"
+            exit 1
+          fi
+
+      - name: Run go vet (syntax check only)
+        run: |
+          # Check Go syntax without cgo (whisper.cpp headers not available)
+          for pkg in ./internal/config ./internal/batch ./internal/device ./internal/models; do
+            CGO_ENABLED=0 go vet "$pkg/..."
+          done
+
+  build-test:
+    name: Build Test (with whisper.cpp)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg build-essential cmake
+
+      - name: Clone and build whisper.cpp
+        run: |
+          git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git $HOME/whisper.cpp
+          cd $HOME/whisper.cpp
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --config Release -j$(nproc)
+
+      - name: Build OpenCaption
+        run: |
+          export WHISPER_CPP=$HOME/whisper.cpp
+          export CGO_CFLAGS="-I$WHISPER_CPP/include -I$WHISPER_CPP/ggml/include"
+          export CGO_LDFLAGS="-L$WHISPER_CPP/build/src -L$WHISPER_CPP/build/ggml/src"
+          go build -o opencaption ./cmd/opencaption
+
+      - name: Verify binary
+        run: |
+          ls -la opencaption
+          file opencaption
+
+  release:
+    name: Release
+    needs: [test, lint, build-test]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg build-essential cmake
+
+      - name: Clone and build whisper.cpp
+        run: |
+          git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git $HOME/whisper.cpp
+          cd $HOME/whisper.cpp
+          mkdir build && cd build
+          cmake ..
+          cmake --build . --config Release -j$(nproc)
+
+      - name: Build release binary
+        run: |
+          export WHISPER_CPP=$HOME/whisper.cpp
+          export CGO_CFLAGS="-I$WHISPER_CPP/include -I$WHISPER_CPP/ggml/include"
+          export CGO_LDFLAGS="-L$WHISPER_CPP/build/src -L$WHISPER_CPP/build/ggml/src -Wl,-rpath,\$ORIGIN/lib"
+          go build -ldflags="-s -w" -o opencaption ./cmd/opencaption
+
+      - name: Package release
+        run: |
+          mkdir -p release/lib
+          cp opencaption release/
+          cp $HOME/whisper.cpp/build/src/libwhisper.so* release/lib/
+          cp $HOME/whisper.cpp/build/ggml/src/libggml*.so* release/lib/
+          cp README.md LICENSE release/
+          cd release && tar -czf ../opencaption-linux-amd64.tar.gz *
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: opencaption-linux-amd64.tar.gz
+          generate_release_notes: true
