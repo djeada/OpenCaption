@@ -41,7 +41,8 @@ jobs:
       - name: Run tests (no cgo)
         run: |
           # Run tests for packages that don't require whisper.cpp
-          CGO_ENABLED=0 go test -v -race -coverprofile=coverage.out ./internal/config/... ./internal/batch/... ./internal/device/... ./internal/models/... ./internal/version/... ./internal/logging/...
+          # Note: -race flag requires CGO, so it's omitted when CGO_ENABLED=0
+          CGO_ENABLED=0 go test -v -coverprofile=coverage.out ./internal/config/... ./internal/batch/... ./internal/device/... ./internal/models/... ./internal/version/... ./internal/logging/...
 
       - name: Upload coverage
         if: matrix.go-version == '1.23'
