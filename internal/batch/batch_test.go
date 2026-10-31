@@ -172,3 +172,29 @@ func TestScanDirectoryEmpty(t *testing.T) {
 		t.Errorf("Empty directory should return 0 jobs, got %d", len(jobs))
 	}
 }
+
+func TestScanDirectoryUppercaseExtension(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Talk.MP4"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := ScanDirectory(dir, filepath.Join(dir, "new", "captions"), "SRT", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].BaseName != "Talk" || filepath.Base(jobs[0].Output) != "Talk.srt" {
+		t.Fatalf("unexpected output naming: %+v", jobs)
+	}
+}
+
+func TestScanDirectoryRejectsOutputCollisions(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"talk.mp4", "talk.wav"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ScanDirectory(dir, "", "vtt", false); err == nil {
+		t.Fatal("expected an error for inputs that would overwrite the same caption file")
+	}
+}

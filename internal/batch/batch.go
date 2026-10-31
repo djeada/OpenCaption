@@ -1,6 +1,7 @@
 package batch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,8 @@ type FileJob struct {
 // ScanDirectory finds all supported audio/video files in a directory.
 func ScanDirectory(dir string, outputDir string, outputFormat string, recursive bool) ([]FileJob, error) {
 	var jobs []FileJob
+	outputs := make(map[string]string)
+	outputFormat = strings.ToLower(outputFormat)
 
 	if outputDir == "" {
 		outputDir = dir
@@ -52,16 +55,23 @@ func ScanDirectory(dir string, outputDir string, outputFormat string, recursive 
 		}
 
 		// Check if file has a supported extension
-		ext := strings.ToLower(filepath.Ext(path))
-		if !SupportedExtensions[ext] {
+		ext := filepath.Ext(path)
+		if !SupportedExtensions[strings.ToLower(ext)] {
 			return nil
 		}
 
 		// Create output path
 		baseName := strings.TrimSuffix(filepath.Base(path), ext)
-		relPath, _ := filepath.Rel(dir, filepath.Dir(path))
+		relPath, err := filepath.Rel(dir, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
 		outDir := filepath.Join(outputDir, relPath)
 		outPath := filepath.Join(outDir, baseName+"."+outputFormat)
+		if previous, exists := outputs[outPath]; exists {
+			return fmt.Errorf("inputs %q and %q map to the same caption file %q; rename one input", previous, path, outPath)
+		}
+		outputs[outPath] = path
 
 		jobs = append(jobs, FileJob{
 			Input:    path,

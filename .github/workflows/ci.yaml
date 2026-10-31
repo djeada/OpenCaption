@@ -9,7 +9,9 @@ on:
     branches: [main, master]
 
 env:
-  GO_VERSION: '1.23'
+  GO_VERSION: '1.24.12'
+  # Match the native library to the Go binding revision in go.mod.
+  WHISPER_CPP_REV: f53dc74843e97f19f94a79241357f74ad5b691a6
 
 jobs:
   test:
@@ -17,9 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      matrix:
-        go-version: ['1.22', '1.23']
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,7 +26,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: Install dependencies
@@ -42,10 +41,9 @@ jobs:
         run: |
           # Run tests for packages that don't require whisper.cpp
           # Note: -race flag requires CGO, so it's omitted when CGO_ENABLED=0
-          CGO_ENABLED=0 go test -v -coverprofile=coverage.out ./internal/config/... ./internal/batch/... ./internal/device/... ./internal/models/... ./internal/version/... ./internal/logging/...
+          CGO_ENABLED=0 go test -v -coverprofile=coverage.out ./internal/config/... ./internal/batch/... ./internal/device/... ./internal/models/... ./internal/version/... ./internal/logging/... ./internal/decode/... ./internal/vad/...
 
       - name: Upload coverage
-        if: matrix.go-version == '1.23'
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage.out
@@ -112,24 +110,29 @@ jobs:
 
       - name: Clone and build whisper.cpp
         run: |
-          git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git $HOME/whisper.cpp
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git $HOME/whisper.cpp
           cd $HOME/whisper.cpp
+          git fetch --depth 1 origin "$WHISPER_CPP_REV"
+          git checkout --detach FETCH_HEAD
           mkdir build && cd build
-          cmake ..
+          cmake .. -DGGML_NATIVE=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=OFF
           cmake --build . --config Release -j$(nproc)
 
-      - name: Build OpenCaption
+      - name: Test and build OpenCaption
         run: |
           export WHISPER_CPP=$HOME/whisper.cpp
           export CGO_CFLAGS="-I$WHISPER_CPP/include -I$WHISPER_CPP/ggml/include"
           export CGO_LDFLAGS="-L$WHISPER_CPP/build/src -L$WHISPER_CPP/build/ggml/src"
+          export LD_LIBRARY_PATH="$WHISPER_CPP/build/src:$WHISPER_CPP/build/ggml/src:${LD_LIBRARY_PATH:-}"
+          go test -race ./...
+          go vet ./...
           go build -ldflags="-X opencaption/internal/version.Version=$(git describe --tags --always --dirty) -X opencaption/internal/version.Commit=$(git rev-parse --short HEAD) -X opencaption/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o opencaption ./cmd/opencaption
 
       - name: Verify binary
         run: |
           ls -la opencaption
           file opencaption
-          ./opencaption -version || true
+          LD_LIBRARY_PATH="$HOME/whisper.cpp/build/src:$HOME/whisper.cpp/build/ggml/src:${LD_LIBRARY_PATH:-}" ./opencaption -version
 
   release:
     name: Release
@@ -157,10 +160,12 @@ jobs:
 
       - name: Clone and build whisper.cpp
         run: |
-          git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git $HOME/whisper.cpp
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git $HOME/whisper.cpp
           cd $HOME/whisper.cpp
+          git fetch --depth 1 origin "$WHISPER_CPP_REV"
+          git checkout --detach FETCH_HEAD
           mkdir build && cd build
-          cmake ..
+          cmake .. -DGGML_NATIVE=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=OFF
           cmake --build . --config Release -j$(nproc)
 
       - name: Build release binary

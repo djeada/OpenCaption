@@ -9,8 +9,8 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Output != "captions.vtt" {
-		t.Errorf("Default Output = %q, want %q", cfg.Output, "captions.vtt")
+	if cfg.Output != "" {
+		t.Errorf("Default Output = %q, want empty for mode-specific resolution", cfg.Output)
 	}
 	if cfg.Format != "vtt" {
 		t.Errorf("Default Format = %q, want %q", cfg.Format, "vtt")
@@ -219,5 +219,38 @@ func TestApplyPresetSubtitle(t *testing.T) {
 	}
 	if cfg.Format != "srt" {
 		t.Errorf("Format = %q, want %q", cfg.Format, "srt")
+	}
+}
+
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		change  func(*Config)
+		wantErr bool
+	}{
+		{"defaults with input", func(c *Config) {}, false},
+		{"whole file", func(c *Config) { c.Window = 0 }, false},
+		{"uppercase format", func(c *Config) { c.Format = "SRT" }, false},
+		{"missing input", func(c *Config) { c.Input = "" }, true},
+		{"unknown format", func(c *Config) { c.Format = "txt" }, true},
+		{"negative window", func(c *Config) { c.Window = -1 }, true},
+		{"negative overlap", func(c *Config) { c.Overlap = -1 }, true},
+		{"equal window and overlap", func(c *Config) { c.Window = c.Overlap }, true},
+		{"overlap exceeds window", func(c *Config) { c.Overlap = c.Window + 1 }, true},
+		{"zero line width", func(c *Config) { c.MaxChars = 0 }, true},
+		{"negative line width", func(c *Config) { c.MaxChars = -1 }, true},
+		{"zero line count", func(c *Config) { c.MaxLines = 0 }, true},
+		{"negative line count", func(c *Config) { c.MaxLines = -1 }, true},
+		{"negative threads", func(c *Config) { c.Threads = -1 }, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Input = "talk.mp4"
+			tt.change(cfg)
+			if err := cfg.Validate(); (err != nil) != tt.wantErr {
+				t.Errorf("Validate() = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

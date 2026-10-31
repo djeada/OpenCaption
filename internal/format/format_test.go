@@ -3,6 +3,8 @@ package format
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -72,7 +74,9 @@ func TestWriteVTT(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	WriteVTT(&buf, cues)
+	if err := WriteVTT(&buf, cues); err != nil {
+		t.Fatal(err)
+	}
 	output := buf.String()
 
 	// Check header
@@ -117,7 +121,9 @@ func TestWriteSRT(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	WriteSRT(&buf, cues)
+	if err := WriteSRT(&buf, cues); err != nil {
+		t.Fatal(err)
+	}
 	output := buf.String()
 
 	// Check index
@@ -198,5 +204,45 @@ func TestWriteJSON(t *testing.T) {
 	// Check second cue has multiple lines
 	if len(output.Cues[1].Lines) != 2 {
 		t.Errorf("len(Cues[1].Lines) = %d, want %d", len(output.Cues[1].Lines), 2)
+	}
+}
+
+// failAfterWriter simulates a full disk or broken output pipe after some bytes.
+type failAfterWriter struct {
+	remaining int
+	err       error
+}
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if len(p) > w.remaining {
+		n := w.remaining
+		w.remaining = 0
+		return n, w.err
+	}
+	w.remaining -= len(p)
+	return len(p), nil
+}
+
+func TestCaptionWritersReturnWriteErrors(t *testing.T) {
+	wantErr := errors.New("output failed")
+	writers := map[string]func(io.Writer, []captions.Cue) error{
+		"vtt": WriteVTT, "srt": WriteSRT, "json": WriteJSON,
+	}
+	for name, write := range writers {
+		t.Run(name, func(t *testing.T) {
+			for _, text := range []string{"hello", strings.Repeat("hello ", 1000)} {
+				cues := []captions.Cue{{Idx: 1, End: time.Second, Lines: []string{text}, RawText: text}}
+				var output bytes.Buffer
+				if err := write(&output, cues); err != nil {
+					t.Fatal(err)
+				}
+				for _, limit := range []int{0, 1, output.Len() / 2, output.Len() - 1} {
+					w := &failAfterWriter{remaining: limit, err: wantErr}
+					if err := write(w, cues); !errors.Is(err, wantErr) {
+						t.Errorf("after %d bytes: got %v, want %v", limit, err, wantErr)
+					}
+				}
+			}
+		})
 	}
 }

@@ -1,8 +1,10 @@
 package captions
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
 )
@@ -12,63 +14,55 @@ func TestWrapWords(t *testing.T) {
 		name     string
 		input    string
 		maxChars int
-		maxLines int
 		want     []string
 	}{
 		{
 			name:     "short text fits on one line",
 			input:    "Hello world",
 			maxChars: 42,
-			maxLines: 2,
 			want:     []string{"Hello world"},
 		},
 		{
 			name:     "text wraps to two lines",
 			input:    "This is a longer text that should wrap to multiple lines",
 			maxChars: 30,
-			maxLines: 2,
 			want:     []string{"This is a longer text that", "should wrap to multiple lines"},
 		},
 		{
 			name:     "empty string returns nil",
 			input:    "",
 			maxChars: 42,
-			maxLines: 2,
 			want:     nil,
 		},
 		{
 			name:     "whitespace only returns nil",
 			input:    "   ",
 			maxChars: 42,
-			maxLines: 2,
 			want:     nil,
 		},
 		{
-			name:     "single long word truncated",
+			name:     "single long word split without loss",
 			input:    "supercalifragilisticexpialidocious",
 			maxChars: 20,
-			maxLines: 1,
-			want:     []string{"supercalifragilistic"},
+			want:     []string{"supercalifragilistic", "expialidocious"},
 		},
 		{
-			name:     "respects max lines",
+			name:     "preserves overflow lines",
 			input:    "one two three four five six seven eight nine ten",
 			maxChars: 10,
-			maxLines: 2,
-			want:     []string{"one two", "three four"},
+			want:     []string{"one two", "three four", "five six", "seven", "eight nine", "ten"},
 		},
 		{
-			name:     "zero max lines returns nil",
+			name:     "zero max characters returns nil",
 			input:    "Hello world",
-			maxChars: 42,
-			maxLines: 0,
+			maxChars: 0,
 			want:     nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := wrapWords(tt.input, tt.maxChars, tt.maxLines)
+			got := wrapWords(tt.input, tt.maxChars)
 			if len(got) != len(tt.want) {
 				t.Errorf("wrapWords() returned %d lines, want %d lines\ngot: %v\nwant: %v",
 					len(got), len(tt.want), got, tt.want)
@@ -78,30 +72,6 @@ func TestWrapWords(t *testing.T) {
 				if got[i] != tt.want[i] {
 					t.Errorf("wrapWords() line %d = %q, want %q", i, got[i], tt.want[i])
 				}
-			}
-		})
-	}
-}
-
-func TestSoftTruncate(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		max   int
-		want  string
-	}{
-		{"short string unchanged", "Hello", 10, "Hello"},
-		{"exact length unchanged", "Hello", 5, "Hello"},
-		{"truncate at space", "Hello world foo", 12, "Hello world"},
-		{"no space truncate at max", "Helloworld", 5, "Hello"},
-		{"empty string", "", 10, ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := softTruncate(tt.input, tt.max)
-			if got != tt.want {
-				t.Errorf("softTruncate(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
 			}
 		})
 	}
@@ -225,7 +195,7 @@ func TestMergeShortCues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := mergeShortCues(tt.cues, tt.minDur)
+			got := mergeShortCues(tt.cues, tt.minDur, 42, 2)
 			if len(got) != tt.want {
 				t.Errorf("mergeShortCues() returned %d cues, want %d", len(got), tt.want)
 			}
@@ -328,5 +298,72 @@ func TestFindSplitIdx(t *testing.T) {
 				t.Errorf("findSplitIdx(%v) = %d, want %d", tt.words, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestSegmentsToCuesPreservesTextAndLimits(t *testing.T) {
+	tests := []struct {
+		name               string
+		text               string
+		maxChars, maxLines int
+	}{
+		{"long segment", "one two three four five six seven eight nine ten eleven twelve", 10, 2},
+		{"Unicode words", "Café déjà vu Grüße κόσμε привет мир", 10, 2},
+		{"unbroken Unicode", "你好世界这是一个没有空格的字幕测试", 4, 2},
+		{"long word", "supercalifragilisticexpialidocious", 8, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start, end := 3*time.Second, 13*time.Second
+			cues := SegmentsToCues([]whisper.Segment{mockSegment(start, end, tt.text)}, tt.maxChars, tt.maxLines)
+			if len(cues) < 2 {
+				t.Fatalf("expected multiple cues, got %d: %+v", len(cues), cues)
+			}
+			var rendered, raw strings.Builder
+			for i, cue := range cues {
+				if cue.Idx != i+1 || len(cue.Lines) > tt.maxLines || len(cue.Lines) == 0 {
+					t.Errorf("invalid cue: %+v", cue)
+				}
+				if cue.End <= cue.Start || (i > 0 && cue.Start != cues[i-1].End) {
+					t.Errorf("cue timing is not positive and continuous: %+v", cue)
+				}
+				for _, line := range cue.Lines {
+					if !utf8.ValidString(line) || utf8.RuneCountInString(line) > tt.maxChars {
+						t.Errorf("invalid or overlong line: %q", line)
+					}
+					rendered.WriteString(line)
+				}
+				raw.WriteString(cue.RawText)
+			}
+			withoutSpaces := func(s string) string { return strings.Join(strings.Fields(s), "") }
+			for name, got := range map[string]string{"rendered": rendered.String(), "raw": raw.String()} {
+				if withoutSpaces(got) != withoutSpaces(tt.text) {
+					t.Errorf("%s text lost or changed: got %q, want %q", name, got, tt.text)
+				}
+			}
+			if cues[0].Start != start || cues[len(cues)-1].End != end {
+				t.Error("split cues must cover the original segment interval")
+			}
+		})
+	}
+}
+
+func TestSegmentsToCuesMergeRespectsLimitsAndGaps(t *testing.T) {
+	for _, gap := range []time.Duration{0, 10 * time.Second} {
+		segs := []whisper.Segment{
+			mockSegment(0, 300*time.Millisecond, "hello"),
+			mockSegment(300*time.Millisecond+gap, 2*time.Second+gap, "world"),
+		}
+		cues := SegmentsToCues(segs, 5, 1)
+		if len(cues) != 2 {
+			t.Errorf("gap %v: merging should preserve limits, got %+v", gap, cues)
+		}
+	}
+	cues := SegmentsToCues([]whisper.Segment{
+		mockSegment(0, 300*time.Millisecond, "Hi"),
+		mockSegment(10*time.Second, 12*time.Second, "there"),
+	}, 42, 2)
+	if len(cues) != 2 {
+		t.Error("short cues separated by silence must not merge")
 	}
 }
