@@ -3,6 +3,7 @@ package captions
 import (
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
 )
@@ -16,109 +17,113 @@ type Cue struct {
 }
 
 // SegmentsToCues converts whisper segments into wrapped caption cues.
+// Text that exceeds the line limit is split into additional cues, with timing
+// distributed across the original segment in proportion to the text length.
 func SegmentsToCues(segs []whisper.Segment, maxChars, maxLines int) []Cue {
+	if maxChars < 1 || maxLines < 1 {
+		return nil
+	}
 	var cues []Cue
-	idx := 1
 	for _, s := range segs {
-		// basic word-safe wrap
-		lines := wrapWords(s.Text, maxChars, maxLines)
+		lines := wrapWords(s.Text, maxChars)
 		if len(lines) == 0 {
 			continue
 		}
 		cues = append(cues, Cue{
-			Idx:     idx,
-			Start:   s.Start,
-			End:     s.End,
-			Lines:   lines,
-			RawText: s.Text,
+			Start: s.Start, End: s.End, Lines: lines, RawText: s.Text,
 		})
-		idx++
 	}
-	// Merge extremely short cues with neighbors (optional polish)
-	cues = mergeShortCues(cues, 600*time.Millisecond) // merge cues < 600 ms into neighbors when safe
-	return cues
+
+	// Merge before splitting so fragments of an unbroken word are never joined
+	// with an invented space. Only merge when the result fits the user's limits.
+	cues = mergeShortCues(cues, 600*time.Millisecond, maxChars, maxLines)
+	var out []Cue
+	for _, c := range cues {
+		if len(c.Lines) <= maxLines {
+			out = append(out, c)
+			continue
+		}
+		text := []rune(strings.Join(strings.Fields(c.RawText), " "))
+		pos := 0
+		start := c.Start
+		for i := 0; i < len(c.Lines); i += maxLines {
+			lines := c.Lines[i:min(i+maxLines, len(c.Lines))]
+			rawStart := pos
+			for _, line := range lines {
+				pos += utf8.RuneCountInString(line)
+				for pos < len(text) && text[pos] == ' ' {
+					pos++
+				}
+			}
+			end := c.End
+			if pos < len(text) {
+				end = c.Start + time.Duration(float64(c.End-c.Start)*float64(pos)/float64(len(text)))
+			}
+			out = append(out, Cue{
+				Start: start, End: end, Lines: lines,
+				RawText: strings.TrimSpace(string(text[rawStart:pos])),
+			})
+			start = end
+		}
+	}
+	for i := range out {
+		out[i].Idx = i + 1
+	}
+	return out
 }
 
-func wrapWords(s string, maxChars, maxLines int) []string {
-	if maxLines < 1 {
+// wrapWords wraps all text without discarding overflow. Long tokens (including
+// languages without spaces) are split at rune boundaries rather than bytes.
+func wrapWords(s string, maxChars int) []string {
+	if maxChars < 1 {
 		return nil
 	}
-	words := strings.Fields(s)
-	if len(words) == 0 {
-		return nil
-	}
+	text := []rune(strings.Join(strings.Fields(s), " "))
 	var lines []string
-	var curr []string
-	for i := 0; i < len(words); i++ {
-		w := words[i]
-		next := append(curr, w)
-		if len(strings.Join(next, " ")) <= maxChars {
-			curr = next
-			continue
+	for start := 0; start < len(text); {
+		end := start + min(maxChars, len(text)-start)
+		if end < len(text) && text[end] != ' ' {
+			for i := end - 1; i > start; i-- {
+				if text[i] == ' ' {
+					end = i
+					break
+				}
+			}
 		}
-		if len(curr) == 0 {
-			lines = append(lines, softTruncate(w, maxChars))
-			continue
+		line := string(text[start:end])
+		if end < len(text) {
+			words := strings.Fields(line)
+			if split := findSplitIdx(words); split >= 0 && split < len(words)-1 {
+				line = strings.Join(words[:split+1], " ")
+				end = start + utf8.RuneCountInString(line)
+			}
 		}
-		if len(lines) == maxLines-1 {
-			rest := strings.Join(append(curr, words[i:]...), " ")
-			lines = append(lines, softTruncate(rest, maxChars))
-			return lines
+		lines = append(lines, line)
+		start = end
+		for start < len(text) && text[start] == ' ' {
+			start++
 		}
-		if split := findSplitIdx(curr); split >= 0 {
-			lines = append(lines, strings.Join(curr[:split+1], " "))
-			curr = append([]string{}, curr[split+1:]...)
-			curr = append(curr, w)
-		} else {
-			lines = append(lines, strings.Join(curr, " "))
-			curr = []string{w}
-		}
-	}
-	if len(curr) > 0 && len(lines) < maxLines {
-		lines = append(lines, strings.Join(curr, " "))
-	}
-	if len(lines) > maxLines {
-		lines = lines[:maxLines]
 	}
 	return lines
 }
 
-func softTruncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	// find last space before max
-	if idx := strings.LastIndex(s[:max], " "); idx > 0 {
-		return s[:idx]
-	}
-	return s[:max] // worst case, but still no mid-word split if no spaces exist
-}
-
-func mergeShortCues(cues []Cue, minDur time.Duration) []Cue {
-	if len(cues) < 2 {
-		return cues
-	}
+func mergeShortCues(cues []Cue, minDur time.Duration, maxChars, maxLines int) []Cue {
 	var out []Cue
 	for i := 0; i < len(cues); i++ {
 		c := cues[i]
-		dur := c.End - c.Start
-		if dur >= minDur || i == len(cues)-1 {
-			out = append(out, c)
-			continue
+		if c.End-c.Start < minDur && i+1 < len(cues) {
+			next := cues[i+1]
+			text := strings.TrimSpace(c.RawText + " " + next.RawText)
+			lines := wrapWords(text, maxChars)
+			if next.Start >= c.Start && next.Start-c.End <= minDur && next.End >= c.End && len(lines) <= maxLines {
+				c.End = next.End
+				c.RawText = text
+				c.Lines = lines
+				i++
+			}
 		}
-		// merge into next if combined length still readable
-		next := cues[i+1]
-		merged := Cue{
-			Idx:     c.Idx,
-			Start:   c.Start,
-			End:     next.End,
-			Lines:   wrapWords(strings.TrimSpace(c.RawText+" "+next.RawText), 42, 2),
-			RawText: strings.TrimSpace(c.RawText + " " + next.RawText),
-		}
-		out = append(out, merged)
-		i++ // skip next
+		out = append(out, c)
 	}
-	// reindex
 	for i := range out {
 		out[i].Idx = i + 1
 	}

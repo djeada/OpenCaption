@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -24,7 +23,6 @@ import (
 	"opencaption/internal/config"
 	"opencaption/internal/decode"
 	"opencaption/internal/device"
-	"opencaption/internal/format"
 	"opencaption/internal/models"
 	"opencaption/internal/transcribe"
 	"opencaption/internal/vad"
@@ -34,7 +32,7 @@ import (
 // ---------- CLI flags ----------
 var (
 	inPath      = flag.String("in", "", "Input audio/video file or directory (for batch mode)")
-	outPath     = flag.String("out", "captions.vtt", "Output captions file (.vtt, .srt, .json) or directory")
+	outPath     = flag.String("out", "", "Output file or directory (default: captions.vtt for a file, input directory for batch)")
 	modelPath   = flag.String("model", "whisper.cpp/models/ggml-base.en.bin", "Path to ggml/gguf model or model name")
 	modelDir    = flag.String("model-dir", "", "Directory for model files (enables auto-download)")
 	ffmpegPath  = flag.String("ffmpeg-path", "ffmpeg", "Path to ffmpeg binary")
@@ -130,15 +128,11 @@ func main() {
 	// Override config with command-line flags (flags take precedence)
 	applyFlags(cfg)
 
-	// Validate input
-	if cfg.Input == "" {
-		fail(errors.New("please provide -in <file> or -in <directory> with -batch"))
+	if err := cfg.Validate(); err != nil {
+		fail(err)
 	}
-
-	// Validate format
-	formatLower := strings.ToLower(cfg.Format)
-	if formatLower != "vtt" && formatLower != "srt" && formatLower != "json" {
-		fail(errors.New("format must be vtt, srt, or json"))
+	if err := prepareOutput(cfg); err != nil {
+		fail(err)
 	}
 
 	// Handle device detection
@@ -162,12 +156,10 @@ func main() {
 	cfg.Model = resolvedModel
 	logger.Debug("using model", slog.String("path", resolvedModel))
 
-	// Check for batch mode
-	if cfg.BatchMode || batch.IsDirectory(cfg.Input) {
-		if !batch.IsDirectory(cfg.Input) {
-			fail(errors.New("batch mode requires -in to be a directory"))
+	if cfg.BatchMode {
+		if err := runBatch(ctx, cfg); err != nil {
+			fail(err)
 		}
-		runBatch(ctx, cfg)
 		return
 	}
 
@@ -361,61 +353,18 @@ func processAudio(ctx context.Context, wctx whisper.Context, pcm []float32, cfg 
 	return captions.SegmentsToCues(segments, cfg.MaxChars, cfg.MaxLines), nil
 }
 
-func writeOutput(outPath, formatType string, cues []captions.Cue) error {
-	var out *os.File
-	if strings.ToLower(outPath) == "-" {
-		out = os.Stdout
-	} else {
-		if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil && !os.IsExist(err) {
-			return err
-		}
-		f, err := os.Create(outPath)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		out = f
-	}
-
-	switch strings.ToLower(formatType) {
-	case "json":
-		return format.WriteJSON(out, cues)
-	case "srt":
-		format.WriteSRT(out, cues)
-	default:
-		if !strings.HasSuffix(strings.ToLower(outPath), ".vtt") && outPath != "-" {
-			logger.Warn("writing VTT format; consider using .vtt extension")
-		}
-		format.WriteVTT(out, cues)
-	}
-	return nil
-}
-
-func runBatch(ctx context.Context, cfg *config.Config) {
-	// Determine output directory
-	outDir := cfg.Output
-	if !batch.IsDirectory(outDir) {
-		outDir = cfg.Input
-	}
-
-	jobs, err := batch.ScanDirectory(cfg.Input, outDir, cfg.Format, cfg.Recursive)
+func runBatch(ctx context.Context, cfg *config.Config) error {
+	jobs, err := batch.ScanDirectory(cfg.Input, cfg.Output, cfg.Format, cfg.Recursive)
 	if err != nil {
-		fail(err)
+		return err
 	}
 
 	if len(jobs) == 0 {
 		logger.Warn("no supported media files found", slog.String("directory", cfg.Input))
-		return
+		return nil
 	}
 
 	logger.Info("starting batch processing", slog.Int("files", len(jobs)))
-
-	// Load model once for all files
-	model, err := whisper.New(cfg.Model)
-	if err != nil {
-		fail(fmt.Errorf("load model: %w", err))
-	}
-	defer model.Close()
 
 	// Determine number of workers
 	// Default cap is set to avoid memory issues - large Whisper models can use 1-3GB+ RAM each
@@ -428,23 +377,38 @@ func runBatch(ctx context.Context, cfg *config.Config) {
 		}
 	}
 
-	// For single worker, process sequentially
-	if numWorkers == 1 {
-		runBatchSequential(ctx, cfg, model, jobs)
-		return
+	if numWorkers > len(jobs) {
+		numWorkers = len(jobs)
 	}
 
-	// Parallel processing with worker pool
-	runBatchParallel(ctx, cfg, model, jobs, numWorkers)
+	// NewContext shares the model's native whisper_context. Each concurrent
+	// worker therefore needs its own model to avoid corrupting inference state.
+	workerModels := make([]whisper.Model, 0, numWorkers)
+	for w := 0; w < numWorkers; w++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		model, err := whisper.New(cfg.Model)
+		if err != nil {
+			return fmt.Errorf("load model for worker %d: %w", w+1, err)
+		}
+		defer model.Close()
+		workerModels = append(workerModels, model)
+	}
+
+	if numWorkers == 1 {
+		return runBatchSequential(ctx, cfg, workerModels[0], jobs)
+	}
+	return runBatchParallel(ctx, cfg, workerModels, jobs)
 }
 
-func runBatchSequential(ctx context.Context, cfg *config.Config, model whisper.Model, jobs []batch.FileJob) {
+func runBatchSequential(ctx context.Context, cfg *config.Config, model whisper.Model, jobs []batch.FileJob) error {
 	successCount := 0
 	for i, job := range jobs {
 		select {
 		case <-ctx.Done():
 			logger.Info("batch processing cancelled")
-			return
+			return ctx.Err()
 		default:
 		}
 
@@ -478,12 +442,14 @@ func runBatchSequential(ctx context.Context, cfg *config.Config, model whisper.M
 		successCount++
 	}
 
-	logger.Info("batch complete",
-		slog.Int("success", successCount),
-		slog.Int("total", len(jobs)))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return batchSummary(successCount, len(jobs))
 }
 
-func runBatchParallel(ctx context.Context, cfg *config.Config, model whisper.Model, jobs []batch.FileJob, numWorkers int) {
+func runBatchParallel(ctx context.Context, cfg *config.Config, workerModels []whisper.Model, jobs []batch.FileJob) error {
+	numWorkers := len(workerModels)
 	logger.Info("using parallel processing", slog.Int("workers", numWorkers))
 
 	type result struct {
@@ -501,9 +467,9 @@ func runBatchParallel(ctx context.Context, cfg *config.Config, model whisper.Mod
 
 	// Start workers
 	var wg sync.WaitGroup
-	for w := 0; w < numWorkers; w++ {
+	for _, model := range workerModels {
 		wg.Add(1)
-		go func() {
+		go func(model whisper.Model) {
 			defer wg.Done()
 			for item := range jobChan {
 				select {
@@ -520,7 +486,7 @@ func runBatchParallel(ctx context.Context, cfg *config.Config, model whisper.Mod
 				cues, err := processFileWithModel(ctx, &jobCfg, model)
 				resultChan <- result{job: item.job, cues: cues, err: err, index: item.index}
 			}
-		}()
+		}(model)
 	}
 
 	// Send jobs
@@ -565,9 +531,10 @@ func runBatchParallel(ctx context.Context, cfg *config.Config, model whisper.Mod
 		successCount++
 	}
 
-	logger.Info("batch complete",
-		slog.Int("success", successCount),
-		slog.Int("total", len(jobs)))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return batchSummary(successCount, len(jobs))
 }
 
 func processFileWithModel(ctx context.Context, cfg *config.Config, model whisper.Model) ([]captions.Cue, error) {
@@ -592,4 +559,12 @@ func processFileWithModel(ctx context.Context, cfg *config.Config, model whisper
 	}
 
 	return processAudio(ctx, wctx, pcm, cfg)
+}
+
+func batchSummary(successCount, total int) error {
+	logger.Info("batch complete", slog.Int("success", successCount), slog.Int("total", total))
+	if successCount != total {
+		return fmt.Errorf("batch processing failed for %d of %d files", total-successCount, total)
+	}
+	return nil
 }

@@ -43,7 +43,6 @@ type Config struct {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		Output:     "captions.vtt",
 		Model:      "whisper.cpp/models/ggml-base.en.bin",
 		FFmpegPath: "ffmpeg",
 		Device:     "auto",
@@ -54,6 +53,31 @@ func DefaultConfig() *Config {
 		MaxLines:   2,
 		Format:     "vtt",
 	}
+}
+
+// Validate checks processing options after config, presets, and flags are merged.
+func (c *Config) Validate() error {
+	if c.Input == "" {
+		return errors.New("please provide -in <file> or -in <directory> with -batch")
+	}
+	switch strings.ToLower(c.Format) {
+	case "vtt", "srt", "json":
+	default:
+		return errors.New("format must be vtt, srt, or json")
+	}
+	if c.Window < 0 || c.Overlap < 0 {
+		return errors.New("window and overlap must be non-negative")
+	}
+	if c.Window > 0 && c.Window <= c.Overlap {
+		return errors.New("window must be > overlap")
+	}
+	if c.MaxChars < 1 || c.MaxLines < 1 {
+		return errors.New("maxchars and maxlines must be positive")
+	}
+	if c.Threads < 0 {
+		return errors.New("threads must be non-negative (0 = auto)")
+	}
+	return nil
 }
 
 // LoadFile loads a config from a JSON or YAML file.

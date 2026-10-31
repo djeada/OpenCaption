@@ -1,6 +1,7 @@
 package format
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -82,25 +83,29 @@ func tsSRT(t time.Duration) string {
 }
 
 // WriteVTT writes cues as a WEBVTT document.
-func WriteVTT(w io.Writer, cues []captions.Cue) {
-	fmt.Fprintln(w, "WEBVTT\n")
+func WriteVTT(w io.Writer, cues []captions.Cue) error {
+	out := bufio.NewWriter(w)
+	fmt.Fprint(out, "WEBVTT\n\n")
 	for _, c := range cues {
-		fmt.Fprintf(w, "%s --> %s\n", tsVTT(c.Start), tsVTT(c.End))
+		fmt.Fprintf(out, "%s --> %s\n", tsVTT(c.Start), tsVTT(c.End))
 		for _, line := range c.Lines {
-			fmt.Fprintln(w, line)
+			fmt.Fprintln(out, line)
 		}
-		fmt.Fprintln(w)
+		fmt.Fprintln(out)
 	}
+	return out.Flush()
 }
 
 // WriteSRT writes cues in SRT format.
-func WriteSRT(w io.Writer, cues []captions.Cue) {
+func WriteSRT(w io.Writer, cues []captions.Cue) error {
+	out := bufio.NewWriter(w)
 	for _, c := range cues {
-		fmt.Fprintln(w, c.Idx)
-		fmt.Fprintf(w, "%s --> %s\n", tsSRT(c.Start), tsSRT(c.End))
+		fmt.Fprintln(out, c.Idx)
+		fmt.Fprintf(out, "%s --> %s\n", tsSRT(c.Start), tsSRT(c.End))
 		for _, line := range c.Lines {
-			fmt.Fprintln(w, line)
+			fmt.Fprintln(out, line)
 		}
-		fmt.Fprintln(w)
+		fmt.Fprintln(out)
 	}
+	return out.Flush()
 }

@@ -272,11 +272,22 @@ Process multiple files efficiently:
 ./opencaption -batch -recursive -in ./videos/ -out ./captions/
 ```
 
+When `-out` is omitted, batch captions are written beside the input files. A
+specified output directory is created automatically, and recursive processing
+preserves the input subdirectory structure. Inputs such as `talk.mp4` and
+`talk.wav` that would produce the same caption path are rejected with a clear
+error; rename one input or process them separately with explicit output files.
+A batch returns a nonzero exit status if any file fails. Each parallel worker
+loads its own model; use `-workers 1` to limit memory use with large models.
+
 ---
 
 ## 📄 Output Formats
 
-OpenCaption supports multiple caption formats:
+OpenCaption supports multiple caption formats. Long segments are split into
+additional cues to preserve the complete transcript while respecting `-maxchars`
+and `-maxlines`. Split cue times are estimated from text length within the
+original segment. Wrapping counts Unicode characters and preserves valid UTF-8.
 
 | Format | Extension | Use Case |
 |--------|-----------|----------|
@@ -328,7 +339,7 @@ OpenCaption supports multiple caption formats:
 | Flag | Type | Description |
 |------|------|-------------|
 | `-in` | string | Input audio/video file or directory (for batch mode) |
-| `-out` | string | Output captions file (.vtt, .srt, .json) or directory |
+| `-out` | string | Output file or directory; default: `captions.vtt` for a file, input directory for batch |
 | `-format` | string | Caption format: `vtt` \| `srt` \| `json` (default: `vtt`) |
 
 ### Model Options
@@ -354,7 +365,7 @@ OpenCaption supports multiple caption formats:
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `-maxchars` | int | `42` | Max characters per line |
+| `-maxchars` | int | `42` | Max Unicode characters per line |
 | `-maxlines` | int | `2` | Max lines per cue |
 
 ### Configuration Options
@@ -393,12 +404,21 @@ OpenCaption supports multiple caption formats:
 ### Running Tests
 
 ```bash
-# Run tests without CGO (packages that don't require whisper.cpp)
-CGO_ENABLED=0 go test -v ./internal/...
+# Run packages that do not depend on whisper.cpp
+CGO_ENABLED=0 go test ./internal/config ./internal/batch ./internal/decode ./internal/device ./internal/models ./internal/version ./internal/logging ./internal/vad
 
-# Run with race detection
-CGO_ENABLED=0 go test -race ./internal/config/... ./internal/batch/...
+# Run the full suite, including caption and formatting tests (requires whisper.cpp)
+WHISPER_CPP=/path/to/whisper.cpp make test
+
+# Run the full suite with Go race detection (requires CGO and whisper.cpp)
+WHISPER_CPP=/path/to/whisper.cpp make test TEST_FLAGS=-race
 ```
+
+For full tests, use the whisper.cpp revision pinned by the Go binding in
+`go.mod` (`f53dc74843e97f19f94a79241357f74ad5b691a6`). Make embeds runtime library
+paths by default; set `LD_LIBRARY_PATH` to the whisper.cpp and ggml library
+directories if your build disables that behavior. CI builds this native revision
+and runs the complete test suite with race detection.
 
 ### Building with Version Information
 
